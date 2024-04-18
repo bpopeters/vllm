@@ -1,9 +1,12 @@
 """A layer that samples the next tokens from the model's outputs."""
 import itertools
 from typing import Dict, List, Optional, Tuple
+from functools import partial
 
 import torch
 import torch.nn as nn
+
+from entmax import entmax15, sparsemax, entmax_bisect
 
 from vllm.model_executor.layers.ops.sample import sample as sample_triton
 from vllm.model_executor.sampling_metadata import (SamplingMetadata,
@@ -12,6 +15,34 @@ from vllm.sampling_params import SamplingParams, SamplingType
 from vllm.sequence import (Logprob, PromptLogprobs, SampleLogprobs,
                            SamplerOutput, SequenceData, SequenceGroupOutput,
                            SequenceOutput)
+
+
+def entmax_castable(z, alpha, exact, dtype=None, log=False, k=512, n_iter=32, **kwargs):
+    # hold on.
+    # We want it to be entmax but to be possible to return the original dtype.
+    # Unlike with softmax, we *need* to do the entmax computation in fp32
+    # (because the current implementation failed with reduced precision).
+
+    if exact:
+        assert alpha == 1.5 or alpha == 2.0
+        f = entmax15 if alpha == 1.5 else sparsemax
+        prob_func = partial(f, k=k)
+    else:
+        prob_func = partial(entmax_bisect, alpha=alpha, n_iter=n_iter)
+
+    original_dtype = z.dtype
+    p = prob_func(z.float(), **kwargs)
+    if log:
+        p = torch.log(p)
+    if dtype is not None:
+        p = p.to(dtype)
+    else:
+        p = p.to(original_dtype)
+    return p
+
+
+def log_f(z, prob_func, **kwargs):
+    return torch.log(prob_func(z, **kwargs))
 
 
 class Sampler(nn.Module):
@@ -49,8 +80,30 @@ class Sampler(nn.Module):
 
         # Prepare sampling tensors with pinned memory to avoid blocking.
         (sampling_tensors, do_penalties, do_top_p_top_k,
-         do_min_p) = SamplingTensors.from_sampling_metadata(
+         do_min_p, entmax_alpha, entmax_exact, entmax_topk, entmax_n_iter) = SamplingTensors.from_sampling_metadata(
              sampling_metadata, vocab_size, logits.device, logits.dtype)
+
+        if entmax_alpha == 1.0:
+            prob_func = torch.softmax
+            log_prob_func = torch.log_softmax
+        else:
+            # we have entmax. It's either bisect, sparsemax, or entmax15
+            prob_func = partial(
+                entmax_castable,
+                alpha=entmax_alpha,
+                exact=entmax_exact,
+                k=entmax_topk,
+                n_iter=entmax_n_iter
+            )
+
+            log_prob_func = partial(
+                entmax_castable,
+                alpha=entmax_alpha,
+                exact=entmax_exact,
+                k=entmax_topk,
+                n_iter=entmax_n_iter,
+                log=True
+            )
 
         # Apply presence and frequency penalties.
         if do_penalties:
@@ -65,6 +118,7 @@ class Sampler(nn.Module):
         logits.div_(sampling_tensors.temperatures.unsqueeze_(dim=1))
 
         if do_top_p_top_k:
+            # softmax is called in this function
             logits = _apply_top_k_top_p(logits, sampling_tensors.top_ps,
                                         sampling_tensors.top_ks)
 
@@ -73,10 +127,11 @@ class Sampler(nn.Module):
 
         # We use float32 for probabilities and log probabilities.
         # Compute the probabilities.
-        probs = torch.softmax(logits, dim=-1, dtype=torch.float)
+        # probs = torch.softmax(logits, dim=-1, dtype=torch.float)
+        probs = prob_func(logits, dim=-1, dtype=torch.float)
         # Compute the log probabilities.
         # Use log_softmax to ensure numerical stability.
-        logprobs = torch.log_softmax(logits, dim=-1, dtype=torch.float)
+        logprobs = log_prob_func(logits, dim=-1, dtype=torch.float)
 
         # Sample the next tokens.
         sample_results = _sample(probs, logprobs, sampling_metadata,
@@ -179,6 +234,7 @@ def _apply_top_k_top_p(
     logits: torch.Tensor,
     p: torch.Tensor,
     k: torch.Tensor,
+    prob_func,
 ) -> torch.Tensor:
     logits_sort, logits_idx = logits.sort(dim=-1, descending=False)
 
@@ -190,7 +246,8 @@ def _apply_top_k_top_p(
     logits_sort.masked_fill_(top_k_mask, -float("inf"))
 
     # Apply top-p.
-    probs_sort = logits_sort.softmax(dim=-1)
+    # probs_sort = logits_sort.softmax(dim=-1)
+    probs_sort = prob_func(logits_sort, dim=-1)
     probs_sum = probs_sort.cumsum(dim=-1)
     top_p_mask = probs_sum <= 1 - p.unsqueeze(dim=1)
     # at least one
@@ -210,12 +267,13 @@ def _apply_top_k_top_p(
 def _apply_min_p(
     logits: torch.Tensor,
     min_p: torch.Tensor,
+    prob_func,
 ) -> torch.Tensor:
     """
     Adapted from
     https://github.com/oobabooga/text-generation-webui/blob/3146124ec01f02c8fb1650a6517cf1b60b537aaf/modules/sampler_hijack.py#L16C17-L16C17
     """
-    probs = torch.softmax(logits, dim=-1)
+    probs = prob_func(logits, dim=-1)
     top_probs, _ = probs.max(dim=-1, keepdim=True)
     scaled_min_p = min_p.unsqueeze_(dim=1) * top_probs
     tokens_to_remove = probs < scaled_min_p
@@ -534,7 +592,7 @@ def _get_ranks(x: torch.Tensor, indices: torch.Tensor) -> torch.Tensor:
 
     Returns:
         torch.Tensor: 1D tensor of shape (N,) where N is the no. of tokens.
-                    Each element in the returned tensor represents the rank 
+                    Each element in the returned tensor represents the rank
                     of the chosen token in the input logprob tensor.
     """
     vals = x[torch.arange(0, len(x), device=x.device, dtype=indices.dtype),

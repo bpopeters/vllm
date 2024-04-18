@@ -75,6 +75,10 @@ class SamplingTensors:
     extra_seeds: Optional[torch.Tensor]
     prompt_tokens: torch.Tensor
     output_tokens: torch.Tensor
+    # entmax_alpha: float
+    # entmax_exact: bool
+    # entmax_topk: int
+    # entmax_n_iter: int
 
     @classmethod
     def from_sampling_metadata(
@@ -108,6 +112,12 @@ class SamplingTensors:
         do_top_p_top_k = False
         do_min_p = False
 
+        # entmax stuff (defaults, which can be overridden in the loop)
+        entmax_alpha = 1.0
+        entmax_exact = True
+        entmax_topk = 512
+        entmax_n_iter = 32
+
         # We need one base seed per Triton slice.
         seeds_to_generate = (extra_seeds_to_generate +
                              get_num_triton_sampler_splits(vocab_size))
@@ -122,6 +132,12 @@ class SamplingTensors:
             top_p = sampling_params.top_p
             min_p = sampling_params.min_p
             seed = sampling_params.seed
+
+            # this block: additions for entmax
+            entmax_alpha = sampling_params.entmax_alpha
+            entmax_exact = sampling_params.entmax_exact
+            entmax_topk = sampling_params.entmax_topk
+            entmax_n_iter = sampling_params.entmax_n_iter
 
             is_greedy = sampling_params.sampling_type == SamplingType.GREEDY
 
@@ -197,7 +213,7 @@ class SamplingTensors:
             frequency_penalties, repetition_penalties, sampling_seeds,
             sample_indices, prompt_tokens, output_tokens, vocab_size,
             extra_seeds_to_generate, device, dtype)
-        return (sampling_tensors, do_penalties, do_top_p_top_k, do_min_p)
+        return (sampling_tensors, do_penalties, do_top_p_top_k, do_min_p, entmax_alpha, entmax_exact, entmax_topk, entmax_n_iter)
 
     @classmethod
     def from_lists(cls, temperatures: List[float], top_ps: List[float],

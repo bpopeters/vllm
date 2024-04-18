@@ -129,6 +129,10 @@ class SamplingParams:
         spaces_between_special_tokens: bool = True,
         logits_processors: Optional[List[LogitsProcessor]] = None,
         truncate_prompt_tokens: Optional[Annotated[int, Field(ge=1)]] = None,
+        entmax_alpha: float = 1.0,
+        entmax_exact: bool = True,
+        entmax_topk: int = 512,
+        entmax_n_iter: int = 32,
     ) -> None:
         self.n = n
         self.best_of = best_of if best_of is not None else n
@@ -188,6 +192,12 @@ class SamplingParams:
         # injected by the engine
         self.eos_token_id = None
 
+        # for entmax
+        self.entmax_alpha = entmax_alpha
+        self.entmax_exact = entmax_exact
+        self.entmax_topk = entmax_topk
+        self.entmax_n_iter = entmax_n_iter
+
     def _verify_args(self) -> None:
         if self.n < 1:
             raise ValueError(f"n must be at least 1, got {self.n}.")
@@ -240,6 +250,21 @@ class SamplingParams:
             raise ValueError(
                 "stop strings are only supported when detokenize is True. "
                 "Set detokenize=True to use stop.")
+
+        # for entmax
+        if self.entmax_alpha < 0:
+            raise ValueError(f"bad entmax_alpha: got {self.entmax_alpha}")
+
+        if self.entmax_alpha not in {1.0, 1.5, 2.0}:
+            if self.entmax_exact:
+                raise ValueError(
+                    f"Invalid alpha for exact entmax: {self.entmax_alpha}")
+
+        if self.entmax_topk < 0:
+            raise ValueError(f"Invalid entmax_topk: {self.entmax_topk}")
+
+        if self.entmax_n_iter < 0:
+            raise ValueError(f"Invalid entmax_n_iter: {self.entmax_n_iter}")
 
     def _verify_beam_search(self) -> None:
         if self.best_of == 1:

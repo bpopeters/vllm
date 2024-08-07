@@ -120,10 +120,10 @@ class Sampler(nn.Module):
         if do_top_p_top_k:
             # softmax is called in this function
             logits = _apply_top_k_top_p(logits, sampling_tensors.top_ps,
-                                        sampling_tensors.top_ks)
+                                        sampling_tensors.top_ks, prob_func)
 
         if do_min_p:
-            logits = _apply_min_p(logits, sampling_tensors.min_ps)
+            logits = _apply_min_p(logits, sampling_tensors.min_ps, prob_func)
 
         # We use float32 for probabilities and log probabilities.
         # Compute the probabilities.

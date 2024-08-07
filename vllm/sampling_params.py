@@ -346,4 +346,8 @@ class SamplingParams:
             f"skip_special_tokens={self.skip_special_tokens}, "
             "spaces_between_special_tokens="
             f"{self.spaces_between_special_tokens}, "
-            f"truncate_prompt_tokens={self.truncate_prompt_tokens})")
+            f"truncate_prompt_tokens={self.truncate_prompt_tokens}, "
+            f"entmax_alpha={self.entmax_alpha}, "
+            f"entmax_exact={self.entmax_exact}, "
+            f"entmax_topk={self.entmax_topk}, "
+            f"entmax_n_iter={self.entmax_n_iter})")

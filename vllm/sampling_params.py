@@ -178,6 +178,12 @@ class SamplingParams:
         else:
             self.output_text_buffer_length = 0
 
+        # for entmax
+        self.entmax_alpha = entmax_alpha
+        self.entmax_exact = entmax_exact
+        self.entmax_topk = entmax_topk
+        self.entmax_n_iter = entmax_n_iter
+
         self._verify_args()
         if self.use_beam_search:
             self._verify_beam_search()
@@ -191,12 +197,6 @@ class SamplingParams:
                 self._verify_greedy_sampling()
         # injected by the engine
         self.eos_token_id = None
-
-        # for entmax
-        self.entmax_alpha = entmax_alpha
-        self.entmax_exact = entmax_exact
-        self.entmax_topk = entmax_topk
-        self.entmax_n_iter = entmax_n_iter
 
     def _verify_args(self) -> None:
         if self.n < 1:

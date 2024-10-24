@@ -45,6 +45,28 @@ def log_f(z, prob_func, **kwargs):
     return torch.log(prob_func(z, **kwargs))
 
 
+def tsallis_entropy(p, alpha):
+    # should be fine with a hardcoded dim, right?
+    return (1 - (p ** alpha).sum(dim=-1)) / (alpha * (alpha - 1))
+
+
+def elementwise_entmax_loss(z, p, alpha):
+    """
+    z and p are (L x V)
+
+    compute dot(p, z) + H_t(p, alpha) - z (shape is L x V)
+    """
+    assert z.dim() == 2
+    assert z.size() == p.size()
+    # L[i, y] gives the loss for class y at position i in the sequence
+    H_t = tsallis_entropy(p, alpha).unsqueeze(-1, 1)  # shape is L x 1
+
+    dot_prod = torch.bmm(p.unsqueeze(1), z.unsqueeze(2)).view(-1, 1)
+    loss = dot_prod + H_t - z
+
+    return loss
+
+
 class Sampler(nn.Module):
     """Samples the next tokens from the model's outputs.
 
@@ -80,7 +102,8 @@ class Sampler(nn.Module):
 
         # Prepare sampling tensors with pinned memory to avoid blocking.
         (sampling_tensors, do_penalties, do_top_p_top_k,
-         do_min_p, entmax_alpha, entmax_exact, entmax_topk, entmax_n_iter) = SamplingTensors.from_sampling_metadata(
+         do_min_p, entmax_alpha, entmax_exact, entmax_topk, entmax_n_iter,
+         return_negative_loss) = SamplingTensors.from_sampling_metadata(
              sampling_metadata, vocab_size, logits.device, logits.dtype)
 
         if entmax_alpha == 1.0:
@@ -136,9 +159,19 @@ class Sampler(nn.Module):
         # Sample the next tokens.
         sample_results = _sample(probs, logprobs, sampling_metadata,
                                  sampling_tensors)
+
+        if return_negative_loss:
+            # queried results are negative loss. This is useful in cases where
+            # the logprob is -inf, which occurs when a token has probability 0
+            scores = -elementwise_entmax_loss(logits, probs, entmax_alpha)
+        else:
+            # queried logprobs are actually logprobs (which is the same as the
+            # negative loss if using softmax+nll)
+            scores = logprobs
+
         # Get the logprobs query results.
         prompt_logprobs, sample_logprobs = _get_logprobs(
-            logprobs, sampling_metadata, sample_results)
+            scores, sampling_metadata, sample_results)
         return _build_sampler_output(sample_results, sampling_metadata,
                                      prompt_logprobs, sample_logprobs)
 

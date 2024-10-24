@@ -133,6 +133,7 @@ class SamplingParams:
         entmax_exact: bool = True,
         entmax_topk: int = 512,
         entmax_n_iter: int = 32,
+        return_negative_loss: bool = False,
     ) -> None:
         self.n = n
         self.best_of = best_of if best_of is not None else n
@@ -183,6 +184,10 @@ class SamplingParams:
         self.entmax_exact = entmax_exact
         self.entmax_topk = entmax_topk
         self.entmax_n_iter = entmax_n_iter
+
+        # for returning negative losses per generated token instead of
+        # logprobs (they'll still be wrapped in logprob objects)
+        self.return_negative_loss = return_negative_loss
 
         self._verify_args()
         if self.use_beam_search:

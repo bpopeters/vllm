@@ -138,6 +138,7 @@ class SamplingTensors:
             entmax_exact = sampling_params.entmax_exact
             entmax_topk = sampling_params.entmax_topk
             entmax_n_iter = sampling_params.entmax_n_iter
+            return_negative_loss = sampling_params.return_negative_loss
 
             is_greedy = sampling_params.sampling_type == SamplingType.GREEDY
 
@@ -213,7 +214,7 @@ class SamplingTensors:
             frequency_penalties, repetition_penalties, sampling_seeds,
             sample_indices, prompt_tokens, output_tokens, vocab_size,
             extra_seeds_to_generate, device, dtype)
-        return (sampling_tensors, do_penalties, do_top_p_top_k, do_min_p, entmax_alpha, entmax_exact, entmax_topk, entmax_n_iter)
+        return (sampling_tensors, do_penalties, do_top_p_top_k, do_min_p, entmax_alpha, entmax_exact, entmax_topk, entmax_n_iter, return_negative_loss)
 
     @classmethod
     def from_lists(cls, temperatures: List[float], top_ps: List[float],

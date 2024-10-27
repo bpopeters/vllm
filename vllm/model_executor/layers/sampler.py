@@ -163,7 +163,7 @@ class Sampler(nn.Module):
         if return_negative_loss:
             # queried results are negative loss. This is useful in cases where
             # the logprob is -inf, which occurs when a token has probability 0
-            scores = -elementwise_entmax_loss(logits, probs, entmax_alpha)
+            scores = -elementwise_entmax_loss(logits.to(torch.float), probs, entmax_alpha)
         else:
             # queried logprobs are actually logprobs (which is the same as the
             # negative loss if using softmax+nll)

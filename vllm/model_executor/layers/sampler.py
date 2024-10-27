@@ -59,7 +59,7 @@ def elementwise_entmax_loss(z, p, alpha):
     assert z.dim() == 2
     assert z.size() == p.size()
     # L[i, y] gives the loss for class y at position i in the sequence
-    H_t = tsallis_entropy(p, alpha).unsqueeze(-1, 1)  # shape is L x 1
+    H_t = tsallis_entropy(p, alpha).view(-1, 1)  # shape is L x 1
 
     dot_prod = torch.bmm(p.unsqueeze(1), z.unsqueeze(2)).view(-1, 1)
     loss = dot_prod + H_t - z
